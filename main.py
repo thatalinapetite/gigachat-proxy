@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-import httpx, base64, time, os, uuid
+import httpx, time, os, uuid
 
 app = FastAPI()
 _cache = {"token": None, "exp": 0}
@@ -8,7 +8,6 @@ AUTH_KEY = os.environ["GC_AUTH_KEY"]
 TG_TOKEN = os.environ.get("TG_TOKEN", "")
 DIFY_KEY = os.environ.get("DIFY_KEY", "")
 
-# Хранилище conversation_id для каждого пользователя
 conversations = {}
 
 def get_token():
@@ -29,13 +28,16 @@ def get_token():
     _cache["exp"] = data["expires_at"] / 1000
     return _cache["token"]
 
-def send_message(chat_id, text, reply_to=None):
-    payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
-    if reply_to:
-        payload["reply_to_message_id"] = reply_to
-    httpx.post(
+def send_message(chat_id, text):
+    return httpx.post(
         f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
-        json=payload
+        json={"chat_id": chat_id, "text": text}
+    ).json()
+
+def edit_message(chat_id, message_id, text):
+    httpx.post(
+        f"https://api.telegram.org/bot{TG_TOKEN}/editMessageText",
+        json={"chat_id": chat_id, "message_id": message_id, "text": text}
     )
 
 def send_typing(chat_id):
@@ -59,86 +61,97 @@ async def webhook(request: Request):
     data = await request.json()
     if "message" not in data:
         return {"ok": True}
-    
+
     text = data["message"].get("text", "")
     chat_id = data["message"]["chat"]["id"]
-    message_id = data["message"]["message_id"]
     user_id = str(chat_id)
-    
+
     if not text:
         return {"ok": True}
 
-    # Команда /start
+    # /start
     if text == "/start":
         conversations.pop(user_id, None)
-        send_message(chat_id, 
-            "👋 <b>Привет! Я Лара — HR-ассистент ТехКорп</b>\n\n"
+        send_message(chat_id,
+            "Добрый день! Я Лара — HR-ассистент компании ТехКорп.\n\n"
             "Помогу разобраться с вопросами по:\n"
-            "📅 <b>Отпускам</b> — оформление, сроки, разделение\n"
-            "🏥 <b>ДМС</b> — покрытие, как воспользоваться\n"
-            "✈️ <b>Командировкам</b> — суточные, лимиты, отчётность\n\n"
-            "Просто напишите свой вопрос!")
+            "📅 Отпускам — оформление, сроки, разделение\n"
+            "🏥 ДМС — покрытие, как воспользоваться\n"
+            "✈️ Командировкам — суточные, лимиты, отчётность\n\n"
+            "Просто напишите свой вопрос!\n\n"
+            "📋 /help — список тем\n"
+            "📞 /contacts — контакты HR\n"
+            "🔄 /reset — сбросить диалог"
+        )
         return {"ok": True}
 
-    # Команда /help
+    # /help
     if text == "/help":
         send_message(chat_id,
-            "📋 <b>Я могу помочь с:</b>\n\n"
-            "📅 <b>Отпуск:</b>\n"
+            "Я могу помочь с:\n\n"
+            "📅 Отпуск:\n"
             "— Сколько дней отпуска положено?\n"
             "— Как оформить отпуск?\n"
             "— Можно разделить отпуск?\n\n"
-            "🏥 <b>ДМС:</b>\n"
+            "🏥 ДМС:\n"
             "— Что покрывает страховка?\n"
             "— Как записаться к врачу?\n\n"
-            "✈️ <b>Командировки:</b>\n"
+            "✈️ Командировки:\n"
             "— Какие суточные?\n"
             "— Лимиты на гостиницу?\n\n"
             "🔄 /reset — сбросить историю диалога\n"
-            "📞 /contacts — контакты HR-отдела")
+            "📞 /contacts — контакты HR-отдела"
+        )
         return {"ok": True}
 
-    # Команда /reset
+    # /reset
     if text == "/reset":
         conversations.pop(user_id, None)
         send_message(chat_id, "🔄 История диалога сброшена. Начнём заново!")
         return {"ok": True}
 
-    # Команда /contacts
+    # /contacts
     if text == "/contacts":
         send_message(chat_id,
-            "📞 <b>Контакты HR-отдела ТехКорп:</b>\n\n"
+            "📞 Контакты HR-отдела ТехКорп:\n\n"
             "📧 Email: hr@techcorp.ru\n"
             "☎️ Телефон: 101 (внутренний)\n"
-            "🕐 Режим работы: пн-пт 9:00-18:00")
+            "🕐 Режим работы: пн-пт 9:00-18:00"
+        )
         return {"ok": True}
 
-    # Обычное сообщение → Dify
+    # Обычное сообщение
     send_typing(chat_id)
-    
-    # Получаем conversation_id для пользователя
+
+    # Индикатор загрузки
+    loading = send_message(chat_id, "⏳ Ищу в регламенте...")
+    loading_id = loading["result"]["message_id"]
+
     conv_id = conversations.get(user_id, "")
-    
-    r = httpx.post(
-        "https://api.dify.ai/v1/chat-messages",
-        headers={"Authorization": f"Bearer {DIFY_KEY}"},
-        json={
-            "inputs": {},
-            "query": text,
-            "response_mode": "blocking",
-            "conversation_id": conv_id,
-            "user": f"tg_{user_id}"
-        },
-        timeout=60
-    )
-    
-    result = r.json()
-    answer = result.get("answer", "Извините, не удалось обработать запрос. Обратитесь: hr@techcorp.ru / тел. 101.")
-    
-    # Сохраняем conversation_id
-    new_conv_id = result.get("conversation_id", "")
-    if new_conv_id:
-        conversations[user_id] = new_conv_id
-    
-    send_message(chat_id, answer, reply_to=message_id)
+
+    try:
+        r = httpx.post(
+            "https://api.dify.ai/v1/chat-messages",
+            headers={"Authorization": f"Bearer {DIFY_KEY}"},
+            json={
+                "inputs": {},
+                "query": text,
+                "response_mode": "blocking",
+                "conversation_id": conv_id,
+                "user": f"tg_{user_id}"
+            },
+            timeout=60
+        )
+        result = r.json()
+        answer = result.get("answer", "Извините, не удалось обработать запрос. Обратитесь: hr@techcorp.ru / тел. 101.")
+
+        new_conv_id = result.get("conversation_id", "")
+        if new_conv_id:
+            conversations[user_id] = new_conv_id
+
+    except Exception:
+        answer = "Извините, не удалось обработать запрос. Попробуйте позже или обратитесь: hr@techcorp.ru / тел. 101."
+
+    # Заменяем индикатор на ответ
+    edit_message(chat_id, loading_id, answer)
     return {"ok": True}
