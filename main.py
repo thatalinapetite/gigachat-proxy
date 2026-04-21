@@ -79,9 +79,9 @@ async def webhook(request: Request):
             "🏥 ДМС — покрытие, как воспользоваться\n"
             "✈️ Командировкам — суточные, лимиты, отчётность\n\n"
             "Просто напишите свой вопрос!\n\n"
-            "📋 /help — список тем\n"
-            "📞 /contacts — контакты HR\n"
-            "🔄 /reset — сбросить диалог"
+            "/help — список тем\n"
+            "/contacts — контакты HR\n"
+            "/reset — сбросить диалог"
         )
         return {"ok": True}
 
@@ -99,8 +99,8 @@ async def webhook(request: Request):
             "✈️ Командировки:\n"
             "— Какие суточные?\n"
             "— Лимиты на гостиницу?\n\n"
-            "🔄 /reset — сбросить историю диалога\n"
-            "📞 /contacts — контакты HR-отдела"
+            "/reset — сбросить историю диалога\n"
+            "/contacts — контакты HR-отдела"
         )
         return {"ok": True}
 
@@ -113,10 +113,10 @@ async def webhook(request: Request):
     # /contacts
     if text == "/contacts":
         send_message(chat_id,
-            "📞 Контакты HR-отдела ТехКорп:\n\n"
-            "📧 Email: hr@techcorp.ru\n"
-            "☎️ Телефон: 101 (внутренний)\n"
-            "🕐 Режим работы: пн-пт 9:00-18:00"
+            "Контакты HR-отдела ТехКорп:\n\n"
+            "Email: hr@techcorp.ru\n"
+            "Телефон: 101 (внутренний)\n"
+            "Режим работы: пн-пт 9:00-18:00"
         )
         return {"ok": True}
 
